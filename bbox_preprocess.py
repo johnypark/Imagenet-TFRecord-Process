@@ -1,9 +1,9 @@
 import xml.etree.ElementTree as ET
 import os
  
-xmlRootDir = 'bbox/'
+xmlRootDir = 'ILSVRC/Annotations/CLS-LOC/train/'# 'bbox/'
 dirs = os.listdir(xmlRootDir)
-files = os.listdir('bbox/'+dirs[0]+'/')
+#files = os.listdir('bbox/'+dirs[0]+'/')
  
 def parseXML(filename):
     bbox = [[],[],[],[]]
@@ -37,6 +37,6 @@ for folder in dirs:
         for j in range(4):
             content += ','+';'.join([str(x) for x in bbox[j]])
         content += '\n'
-    print("processing %i/1000\r"%i, end="")
+    print("processing {}/1000\r".format(i))
 bboxfile.writelines(content)
 bboxfile.close()

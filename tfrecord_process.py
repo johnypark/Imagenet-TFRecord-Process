@@ -9,18 +9,18 @@ import time
 import random
 import math
  
-max_num = 1000  #max record number in one file
-train_path = 'Imagenet/Imagenet/data/'  #the folder stroes the train images
-valid_path = 'Imagenet/Imagenet/validation/'  #the folder stroes the validation images
-cores = 4   #number of CPU cores to process
+max_num = 14000  #max record number in one file
+train_path = 'ILSVRC/Data/CLS-LOC/train/'#Imagenet/Imagenet/data/'  #the folder stroes the train images
+valid_path = 'ILSVRC/Data/CLS-LOC/val/'#Imagenet/Imagenet/validation/'  #the folder stroes the validation images
+cores = 95  #number of CPU cores to process
  
 #Imagenet图片都保存在/data目录下，里面有1000个子目录，获取这些子目录的名字
 classes = os.listdir(train_path)
+classes = sorted(classes)
  
 #构建一个字典，Key是目录名，value是类名0-999
-labels_dict = {}
-for i in range(len(classes)):
-    labels_dict[classes[i]]=i
+labels_dict = dict(zip(classes, 
+                        range(len(classes))))
  
 #构建训练集文件列表，里面的每个元素是路径名+图片文件名+类名
 images_labels_list = []
@@ -30,36 +30,39 @@ for i in range(len(classes)):
     label = str(labels_dict[classes[i]])
     for image_file in images_files:
         images_labels_list.append(path+','+image_file+','+classes[i])
+
 random.shuffle(images_labels_list)
  
 #读取验证集的图片对应的类名标签文件
 valid_classes = []
 with open('imagenet_2012_validation_synset_labels.txt', 'r') as f:
-	  valid_classes = [line.strip() for line in f.readlines()]
+    valid_classes = [line.strip() for line in f.readlines()]
 #构建验证集文件列表，里面的每个元素是路径名+图片文件名+类名
 valid_images_labels_list = []
 valid_images_files = os.listdir(valid_path)
 for file_item in valid_images_files:
     number = int(file_item[15:23])-1
     valid_images_labels_list.append(valid_path+','+file_item+','+valid_classes[number])
+
+
 #把图像数据和标签转换为TRRECORD的格式
-def make_example(image, height, width, label, bbox, text):
-    colorspace = b'RGB'
-    channels = 3
-    img_format = b'JPEG'
+def make_example(image, label):#height, width, label, bbox, text):
+    #colorspace = b'RGB'
+    #channels = 3
+    #img_format = b'JPEG'
     return tf.train.Example(features=tf.train.Features(feature={
         'image' : tf.train.Feature(bytes_list=tf.train.BytesList(value=[image])),
-        'height' : tf.train.Feature(int64_list=tf.train.Int64List(value=[height])),
-        'width' : tf.train.Feature(int64_list=tf.train.Int64List(value=[width])),
-        'channels' : tf.train.Feature(int64_list=tf.train.Int64List(value=[channels])),
-        'colorspace' : tf.train.Feature(bytes_list=tf.train.BytesList(value=[colorspace])),
-        'img_format' : tf.train.Feature(bytes_list=tf.train.BytesList(value=[img_format])),
+        #'height' : tf.train.Feature(int64_list=tf.train.Int64List(value=[height])),
+        #'width' : tf.train.Feature(int64_list=tf.train.Int64List(value=[width])),
+        #'channels' : tf.train.Feature(int64_list=tf.train.Int64List(value=[channels])),
+        #'colorspace' : tf.train.Feature(bytes_list=tf.train.BytesList(value=[colorspace])),
+        #'img_format' : tf.train.Feature(bytes_list=tf.train.BytesList(value=[img_format])),
         'label' : tf.train.Feature(int64_list=tf.train.Int64List(value=[label])),
-        'bbox_xmin' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[0])),
-        'bbox_xmax' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[2])),
-        'bbox_ymin' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[1])),
-        'bbox_ymax' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[3])),
-        'text' : tf.train.Feature(bytes_list=tf.train.BytesList(value=[text]))
+        #'bbox_xmin' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[0])),
+        #'bbox_xmax' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[2])),
+        #'bbox_ymin' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[1])),
+        #'bbox_ymax' : tf.train.Feature(float_list=tf.train.FloatList(value=bbox[3])),
+        #'text' : tf.train.Feature(bytes_list=tf.train.BytesList(value=[text]))
     }))
  
 #读取bbox文件
@@ -77,51 +80,55 @@ with open('bbox_train.csv', 'r') as bboxfile:
  
 #读取Labels的描述
 labels_text = {}
-with open('imagenet_metadata.txt', 'r') as metafile:
+with open('imagenet_metadata.txt', 'r') as metafile: # problem that /t did not apply
     records = metafile.readlines()
     for record in records:
-        fields = record.strip().split('\t')
+        fields = record.strip().split(' ')
+        #print(fields)
         label = fields[0]
         text = fields[1]
         labels_text[label] = text
  
 #这个函数用来生成TFRECORD文件，第一个参数是列表，每个元素是图片文件名加类名，第二个参数是写入的目录名
 #第三个参数是文件名的起始序号，第四个参数是队列名称，用于和父进程发送消息
-def gen_tfrecord(trainrecords, targetfolder, startnum, queue):
+def gen_tfrecord(trainrecords, targetfolder, startnum, queue, prefix):
     tfrecords_file_num = startnum
     file_num = 0
     total_num = len(trainrecords)
     pid = os.getpid()
     queue.put((pid, file_num))
-    writer = tf.python_io.TFRecordWriter(targetfolder+"train_"+str(tfrecords_file_num)+".tfrecord")
+    writer = tf.io.TFRecordWriter(targetfolder+prefix+"_"+str(tfrecords_file_num).zfill(4)+"_"+str(total_num)+".tfrec")
     for record in trainrecords:
+        #print(record)
         file_num += 1
         fields = record.split(',')
         img = cv2.imread(fields[0]+fields[1])
-        height, width, _ = img.shape
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR) # Fix incorrect colors
+        img = cv2.resize(img, [256, 256])
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img_jpg = cv2.imencode('.jpg', img)[1].tobytes()
         label = labels_dict[fields[2]]
-        bbox = []
-        try:
-            bbox = bbox_list[fields[1][:-5]]
-        except KeyError:
-            bbox = [[],[],[],[]]
-        text = labels_text[fields[2]]
-        ex = make_example(img_jpg, height, width, label, bbox, text.encode())
+        #bbox = []
+        #try:
+        #    bbox = bbox_list[fields[1][:-5]]
+        #except KeyError:
+        #    bbox = [[],[],[],[]]
+        #text = labels_text[fields[2]]
+        ex = make_example(img_jpg, label)#, height, width, label, bbox, text.encode())
         writer.write(ex.SerializeToString())
-        #每写入100条记录，向父进程发送消息，报告进度
-        if file_num%100==0:
+        #每写入1000条记录，向父进程发送消息，报告进度
+        if file_num%1000==0:
             queue.put((pid, file_num))
-        if file_num%max_num==0:
+        if file_num%max_num==0: #why??
             writer.close()
             tfrecords_file_num += 1
-            writer = tf.python_io.TFRecordWriter(targetfolder+"train_"+str(tfrecords_file_num)+".tfrecord")
+            writer = tf.io.TFRecordWriter(targetfolder+prefix+"_"+str(tfrecords_file_num).zfill(4)+"_"+str(total_num)+".tfrec")
     writer.close()        
     queue.put((pid, file_num))
  
 #这个函数用来多进程生成TFRECORD文件，第一个参数是要处理的图片的文件名列表，第二个参数是需要用的CPU核心数
 #第三个参数写入的文件目录名
-def process_in_queues(fileslist, cores, targetfolder):
+def process_in_queues(fileslist, cores, targetfolder, prefix):
     total_files_num = len(fileslist)
     each_process_files_num = int(total_files_num/cores)
     files_for_process_list = []
@@ -139,7 +146,7 @@ def process_in_queues(fileslist, cores, targetfolder):
         #queue = Queue()
         processes_list.append(Process(target=gen_tfrecord, 
                                       args=(files_for_process_list[i],targetfolder,
-                                      each_process_tffiles_num*i+1,queues_list[i],)))
+                                      each_process_tffiles_num*i+1,queues_list[i],prefix)))
  
     for p in processes_list:
         Process.start(p)
@@ -154,7 +161,7 @@ def process_in_queues(fileslist, cores, targetfolder):
                 total += msg[1]
                 progress_str+='PID'+str(msg[0])+':'+str(msg[1])+'/'+ str(files_number_list[i])+'|'
             progress_str+='\r'
-            print(progress_str, end='')
+            print(progress_str)
             if total == total_files_num:
                 for p in processes_list:
                     p.terminate()
@@ -168,12 +175,12 @@ def process_in_queues(fileslist, cores, targetfolder):
 if __name__ == '__main__':
     print('Start processing train data using %i CPU cores:'%cores)
     starttime=time.time()       	  
-    total_processed = process_in_queues(images_labels_list, cores, targetfolder='train_tf/')
+    total_processed = process_in_queues(images_labels_list, cores, targetfolder='ILSVRC_tfrec/', prefix ="train")
     endtime=time.time()
     print('\nProcess finish, total process %i images in %i seconds'%(total_processed, int(endtime-starttime)))
  
     print('Start processing validation data using %i CPU cores:'%cores)
     starttime=time.time()  
-    total_processed = process_in_queues(valid_images_labels_list, cores, targetfolder='valid_tf/')
+    total_processed = process_in_queues(valid_images_labels_list, cores =5, targetfolder='ILSVRC_tfrec/', prefix = "val")
     endtime=time.time()
     print('\nProcess finish, total process %i images, using %i seconds'%(total_processed, int(endtime-starttime)))
